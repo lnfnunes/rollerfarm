@@ -804,6 +804,11 @@
       stroke-linejoin: round;
     }
 
+    .farm-line-gap {
+      stroke-dasharray: 5 5;
+      opacity: 0.7;
+    }
+
     .farm-legend {
       display: flex;
       flex-wrap: wrap;
@@ -1443,6 +1448,21 @@
         return { dates: dates, series: series };
       }
 
+      function farmLineSegments(values) {
+        const segments = [];
+        let previous = -1;
+        values.forEach(function (value, index) {
+          if (value === null) {
+            return;
+          }
+          if (previous !== -1) {
+            segments.push({ from: previous, to: index, gap: index - previous > 1 });
+          }
+          previous = index;
+        });
+        return segments;
+      }
+
       function normalizeFarmView(saved) {
         const source = saved && typeof saved === "object" ? saved : {};
         const hidden = Array.isArray(source.hidden) ? source.hidden : [];
@@ -1530,22 +1550,13 @@
 
         visible.forEach(function (symbol) {
           const color = TOKEN_CONFIG[symbol].color;
-          let run = [];
-          const flush = function () {
-            if (run.length > 1) {
-              svg += "<polyline class=\"farm-line\" stroke=\"" + color + "\" points=\"" + run.join(" ") + "\"></polyline>";
-            }
-            run = [];
-          };
-          view.series[symbol].forEach(function (value, index) {
-            if (value === null) {
-              flush();
-              return;
-            }
-            run.push(xAt(index).toFixed(1) + "," + yAt(value, symbol).toFixed(1));
+          const values = view.series[symbol];
+          // Points are joined across days without a snapshot; those segments are dashed.
+          farmLineSegments(values).forEach(function (segment) {
+            svg += "<line class=\"farm-line" + (segment.gap ? " farm-line-gap" : "") + "\" stroke=\"" + color + "\" x1=\"" + xAt(segment.from).toFixed(1) +
+              "\" y1=\"" + yAt(values[segment.from], symbol).toFixed(1) + "\" x2=\"" + xAt(segment.to).toFixed(1) + "\" y2=\"" + yAt(values[segment.to], symbol).toFixed(1) + "\"></line>";
           });
-          flush();
-          // Dots keep isolated days (no neighbour) visible; <title> gives a hover tooltip.
+          // Dots mark each recorded day; <title> gives a hover tooltip.
           view.series[symbol].forEach(function (value, index) {
             if (value !== null) {
               svg += "<circle cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) + "\" r=\"3\" fill=\"" + color + "\"><title>" +
@@ -2138,6 +2149,7 @@
           calculateNextLeagueTarget: calculateNextLeagueTarget,
           recordFarmSnapshot: recordFarmSnapshot,
           buildFarmSeries: buildFarmSeries,
+          farmLineSegments: farmLineSegments,
           normalizeFarmView: normalizeFarmView,
           toggleFarmSymbol: toggleFarmSymbol
         };

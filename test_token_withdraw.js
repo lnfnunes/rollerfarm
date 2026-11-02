@@ -192,4 +192,19 @@ function currency(name, tokensPerDay, totalPower, scale) {
     assert.deepEqual(hidden, ['BTC']);
 }
 
+// Line segments join consecutive recorded points; segments that skip empty days are flagged as gaps.
+{
+    const plain = (value) => JSON.parse(JSON.stringify(value));
+    assert.deepEqual(plain(api.farmLineSegments([1, 2, 3])), [
+        { from: 0, to: 1, gap: false },
+        { from: 1, to: 2, gap: false },
+    ]);
+    assert.deepEqual(plain(api.farmLineSegments([null, 1, null, null, 4, 5, null])), [
+        { from: 1, to: 4, gap: true },
+        { from: 4, to: 5, gap: false },
+    ]);
+    assert.deepEqual(plain(api.farmLineSegments([null, 7, null])), []);
+    assert.deepEqual(plain(api.farmLineSegments([])), []);
+}
+
 console.log('token_withdraw tests passed');
