@@ -207,4 +207,15 @@ function currency(name, tokensPerDay, totalPower, scale) {
     assert.deepEqual(plain(api.farmLineSegments([])), []);
 }
 
+// Change % compares the first and last recorded points of the window, ignoring gaps.
+{
+    assert.equal(api.farmChangePercent([null, 10, 12, null, 15, null]), 50);
+    assert.equal(api.farmChangePercent([null, 8, 4]), -50);
+    assert.equal(api.farmChangePercent([3, 3]), 0);
+    // Needs two distinct recorded points and a non-zero starting value.
+    assert.equal(api.farmChangePercent([null, 5, null]), null);
+    assert.equal(api.farmChangePercent([]), null);
+    assert.equal(api.farmChangePercent([0, 5]), null);
+}
+
 console.log('token_withdraw tests passed');
