@@ -772,6 +772,114 @@
       box-shadow: 0 0 0 2px var(--violet-soft);
     }
 
+    .farm-panel {
+      margin-top: 30px;
+    }
+
+    .farm-chart-wrap {
+      padding: 18px 20px 8px;
+    }
+
+    .farm-chart {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .farm-grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .farm-axis-label {
+      fill: var(--muted);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+    }
+
+    .farm-line {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .farm-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      padding: 4px 24px 20px;
+      color: var(--muted-bright);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.66rem;
+    }
+
+    .farm-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+    }
+
+    .farm-toggle {
+      display: inline-flex;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+    }
+
+    .farm-toggle-button {
+      padding: 6px 14px;
+      border: 0;
+      background: transparent;
+      color: var(--muted-bright);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      cursor: pointer;
+    }
+
+    .farm-toggle-button[aria-pressed="true"] {
+      background: var(--violet-soft);
+      color: var(--text);
+    }
+
+    .farm-note {
+      padding: 0 24px 6px;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.62rem;
+    }
+
+    .farm-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .farm-legend-item[aria-pressed="false"] {
+      opacity: 0.4;
+      text-decoration: line-through;
+    }
+
+    .farm-legend-item:focus-visible,
+    .farm-toggle-button:focus-visible {
+      outline: 2px solid var(--violet);
+      outline-offset: 2px;
+    }
+
+    .farm-legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+
     .empty-state,
     .loading-state {
       padding: 58px 24px;
@@ -982,7 +1090,7 @@
             <label class="username-wrap">
               <span aria-hidden="true">@</span>
               <span class="sr-only">RollerCoin username</span>
-              <input class="username-input" id="usernameInput" name="username" autocomplete="username" spellcheck="false" placeholder="username" required>
+              <input class="username-input" id="usernameInput" name="username" autocomplete="username" spellcheck="false" value="madruguinha" required>
               <span class="profile-name-inline" id="profileNameInline" aria-live="polite">Profile name appears after refresh</span>
             </label>
             <button class="refresh-button" id="refreshButton" type="button"><span class="refresh-icon" aria-hidden="true">&#8635;</span><span>Refresh</span></button>
@@ -1038,6 +1146,23 @@
         </div>
       </section>
 
+      <section class="table-panel farm-panel" aria-labelledby="farm-title">
+        <div class="panel-header">
+          <div>
+            <span class="panel-kicker">Daily farm / last 15 days</span>
+            <h2 class="panel-title" id="farm-title">Farm timeline</h2>
+          </div>
+          <div class="farm-controls">
+            <div class="farm-toggle" role="group" aria-label="Chart unit">
+              <button class="farm-toggle-button" type="button" data-farm-metric="usd" aria-pressed="true">USD</button>
+              <button class="farm-toggle-button" type="button" data-farm-metric="amount" aria-pressed="false">Token</button>
+            </div>
+            <div class="panel-note">One snapshot per day on Refresh.<br>History stays in this browser only.</div>
+          </div>
+        </div>
+        <div id="farmChart"><div class="empty-state"><strong>No history yet</strong><span>Click Refresh to record today's farm.</span></div></div>
+      </section>
+
       <div class="footer-note">
         <span>Data: RollerCoin Calculator API + Binance</span>
         <span>Balances stay in this browser only.</span>
@@ -1053,11 +1178,14 @@
       const LEAGUE_API = "https://api.rollercoincalculator.app/api/League";
       const CALCULATOR_PROXY = "https://summer-night-03c0.rk-foxx-159.workers.dev/?";
       const BINANCE_API = "https://api.binance.com/api/v3/ticker/price";
-      const DEFAULT_USERNAME = "";
+      const DEFAULT_USERNAME = "madruguinha";
       const BALANCE_KEY_PREFIX = "rollercoin-withdraw-balances-v1:";
       const USERNAME_KEY = "rollercoin-withdraw-username-v1";
       const DATA_CACHE_PREFIX = "rollercoin-withdraw-data-v1:";
       const DEFAULT_BLOCK_SECONDS = 596;
+      const FARM_HISTORY_PREFIX = "rollercoin-withdraw-farm-history-v1:";
+      const FARM_HISTORY_DAYS = 15;
+      const FARM_VIEW_KEY = "rollercoin-withdraw-farm-view-v1";
 
       const TOKEN_CONFIG = {
         BTC: { aliases: ["SAT", "BTC"], scale: 1e10, minimum: 0.00085, color: "#f7931a", pair: ["BTCUSDT"], decimals: 8 },
@@ -1112,7 +1240,8 @@
         nextLeagueTrack: document.querySelector(".league-progress-track"),
         nextLeagueRemaining: document.getElementById("nextLeagueRemaining"),
         nextLeagueMatch: document.getElementById("nextLeagueMatch"),
-        resultsBody: document.getElementById("resultsBody")
+        resultsBody: document.getElementById("resultsBody"),
+        farmChart: document.getElementById("farmChart")
       };
 
       const state = {
@@ -1126,6 +1255,7 @@
         leagues: [],
         sortKey: "days",
         sortDirection: "asc",
+        farmView: normalizeFarmView(readStorage(FARM_VIEW_KEY, null)),
         loading: false,
         requestId: 0
       };
@@ -1271,6 +1401,190 @@
 
       function saveBalances() {
         writeStorage(getBalanceKey(state.username), state.balances);
+      }
+
+      function recordFarmSnapshot(history, dateKey, dailyUsdBySymbol) {
+        const next = Object.assign({}, history);
+        next[dateKey] = Object.assign({}, dailyUsdBySymbol);
+        Object.keys(next).sort().slice(0, -FARM_HISTORY_DAYS).forEach(function (key) { delete next[key]; });
+        return next;
+      }
+
+      function toDateKey(date) {
+        const pad = function (value) { return String(value).padStart(2, "0"); };
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+      }
+
+      // Snapshot values are { usd, amount }; legacy snapshots stored the USD number alone.
+      function readFarmValue(entry, metric) {
+        if (typeof entry === "number") {
+          return metric === "usd" && Number.isFinite(entry) ? entry : null;
+        }
+        const value = entry && entry[metric];
+        return Number.isFinite(value) ? value : null;
+      }
+
+      function buildFarmSeries(history, endDateKey, metric) {
+        const end = new Date(endDateKey + "T00:00:00Z");
+        const dates = [];
+        for (let offset = FARM_HISTORY_DAYS - 1; offset >= 0; offset--) {
+          dates.push(new Date(end.getTime() - offset * 86400000).toISOString().slice(0, 10));
+        }
+        const series = {};
+        dates.forEach(function (dateKey, index) {
+          const snapshot = history[dateKey] || {};
+          Object.keys(snapshot).forEach(function (symbol) {
+            if (!series[symbol]) {
+              series[symbol] = dates.map(function () { return null; });
+            }
+            series[symbol][index] = readFarmValue(snapshot[symbol], metric || "usd");
+          });
+        });
+        return { dates: dates, series: series };
+      }
+
+      function normalizeFarmView(saved) {
+        const source = saved && typeof saved === "object" ? saved : {};
+        const hidden = Array.isArray(source.hidden) ? source.hidden : [];
+        return {
+          metric: source.metric === "amount" ? "amount" : "usd",
+          hidden: hidden.filter(function (symbol, index) {
+            return TOKEN_CONFIG[symbol] && hidden.indexOf(symbol) === index;
+          })
+        };
+      }
+
+      function toggleFarmSymbol(hidden, symbol) {
+        return hidden.indexOf(symbol) === -1
+          ? hidden.concat(symbol)
+          : hidden.filter(function (item) { return item !== symbol; });
+      }
+
+      function loadFarmHistory(username) {
+        const saved = readStorage(FARM_HISTORY_PREFIX + username.trim().toLowerCase(), {});
+        return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      }
+
+      function saveFarmSnapshot(username, rows) {
+        const snapshot = {};
+        rows.forEach(function (row) {
+          if (row.price > 0 && Number.isFinite(row.dailyUsd) && Number.isFinite(row.daily)) {
+            snapshot[row.symbol] = { usd: row.dailyUsd, amount: row.daily };
+          }
+        });
+        if (!Object.keys(snapshot).length) {
+          return;
+        }
+        const history = recordFarmSnapshot(loadFarmHistory(username), toDateKey(new Date()), snapshot);
+        writeStorage(FARM_HISTORY_PREFIX + username.trim().toLowerCase(), history);
+      }
+
+      function saveFarmView() {
+        writeStorage(FARM_VIEW_KEY, state.farmView);
+      }
+
+      function updateFarmToggle() {
+        document.querySelectorAll("[data-farm-metric]").forEach(function (button) {
+          button.setAttribute("aria-pressed", String(button.dataset.farmMetric === state.farmView.metric));
+        });
+      }
+
+      function renderFarmChart(username) {
+        updateFarmToggle();
+        const metric = state.farmView.metric;
+        const view = buildFarmSeries(loadFarmHistory(username), toDateKey(new Date()), metric);
+        const symbols = Object.keys(view.series).filter(function (symbol) { return TOKEN_CONFIG[symbol]; });
+        if (!symbols.length) {
+          elements.farmChart.innerHTML = "<div class=\"empty-state\"><strong>No history yet</strong><span>Click Refresh to record today's farm.</span></div>";
+          return;
+        }
+
+        const visible = symbols.filter(function (symbol) { return state.farmView.hidden.indexOf(symbol) === -1; });
+        // Token amounts are not comparable across coins, so with several visible each line is scaled to its own peak.
+        const normalized = metric === "amount" && visible.length > 1;
+        const singleAmount = metric === "amount" && visible.length === 1;
+        const peakOf = function (symbol) {
+          return Math.max.apply(null, view.series[symbol].map(function (value) { return value === null ? 0 : value; })) || 1;
+        };
+        const sharedMax = Math.max.apply(null, visible.map(peakOf).concat(0)) || 1;
+
+        const width = 720, height = 260, left = singleAmount ? 96 : 52, right = 16, top = 14, bottom = 28;
+        const plotWidth = width - left - right, plotHeight = height - top - bottom;
+        const lastIndex = view.dates.length - 1;
+        const xAt = function (index) { return left + plotWidth * index / lastIndex; };
+        const yAt = function (value, symbol) { return top + plotHeight * (1 - value / (normalized ? peakOf(symbol) : sharedMax)); };
+        const formatValue = function (value, symbol) { return metric === "usd" ? formatUsd(value) : formatToken(value, symbol); };
+
+        let svg = "";
+        for (let step = 0; step <= 4; step++) {
+          const y = top + plotHeight * (1 - step / 4);
+          const label = normalized ? (step * 25) + "%" : formatValue(sharedMax * step / 4, visible[0]);
+          svg += "<line class=\"farm-grid-line\" x1=\"" + left + "\" x2=\"" + (width - right) + "\" y1=\"" + y + "\" y2=\"" + y + "\"></line>" +
+            "<text class=\"farm-axis-label\" x=\"" + (left - 8) + "\" y=\"" + (y + 3) + "\" text-anchor=\"end\">" + escapeHtml(label) + "</text>";
+        }
+        view.dates.forEach(function (dateKey, index) {
+          if (index % 2 === lastIndex % 2) {
+            svg += "<text class=\"farm-axis-label\" x=\"" + xAt(index) + "\" y=\"" + (height - 8) + "\" text-anchor=\"middle\">" + escapeHtml(dateKey.slice(5)) + "</text>";
+          }
+        });
+
+        visible.forEach(function (symbol) {
+          const color = TOKEN_CONFIG[symbol].color;
+          let run = [];
+          const flush = function () {
+            if (run.length > 1) {
+              svg += "<polyline class=\"farm-line\" stroke=\"" + color + "\" points=\"" + run.join(" ") + "\"></polyline>";
+            }
+            run = [];
+          };
+          view.series[symbol].forEach(function (value, index) {
+            if (value === null) {
+              flush();
+              return;
+            }
+            run.push(xAt(index).toFixed(1) + "," + yAt(value, symbol).toFixed(1));
+          });
+          flush();
+          // Dots keep isolated days (no neighbour) visible; <title> gives a hover tooltip.
+          view.series[symbol].forEach(function (value, index) {
+            if (value !== null) {
+              svg += "<circle cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) + "\" r=\"3\" fill=\"" + color + "\"><title>" +
+                escapeHtml(symbol + " " + view.dates[index] + ": " + formatValue(value, symbol)) + "</title></circle>";
+            }
+          });
+        });
+
+        const legend = symbols.map(function (symbol) {
+          const active = state.farmView.hidden.indexOf(symbol) === -1;
+          return "<button class=\"farm-legend-item\" type=\"button\" data-farm-symbol=\"" + symbol + "\" aria-pressed=\"" + active + "\">" +
+            "<span class=\"farm-legend-swatch\" style=\"background:" + TOKEN_CONFIG[symbol].color + "\"></span>" + escapeHtml(symbol) + "</button>";
+        }).join("");
+        const body = visible.length
+          ? "<div class=\"farm-chart-wrap\"><svg class=\"farm-chart\" viewBox=\"0 0 " + width + " " + height + "\" role=\"img\" aria-label=\"Daily farm per token over the last 15 days\">" + svg + "</svg></div>"
+          : "<div class=\"empty-state\"><strong>All tokens hidden</strong><span>Click a token below to show it.</span></div>";
+        const note = normalized ? "<div class=\"farm-note\">Each token is scaled to its own peak; hover a point for the real amount. Select a single token for a real axis.</div>" : "";
+        elements.farmChart.innerHTML = body + note + "<div class=\"farm-legend\">" + legend + "</div>";
+      }
+
+      function handleFarmLegendClick(event) {
+        const button = event.target && event.target.closest ? event.target.closest("[data-farm-symbol]") : null;
+        if (!button) {
+          return;
+        }
+        const symbol = button.dataset.farmSymbol;
+        state.farmView.hidden = toggleFarmSymbol(state.farmView.hidden, symbol);
+        saveFarmView();
+        renderFarmChart(state.username);
+        const next = elements.farmChart.querySelector("[data-farm-symbol=\"" + symbol + "\"]");
+        if (next) {
+          next.focus();
+        }
+      }
+
+      function handleFarmMetricClick(event) {
+        state.farmView.metric = event.currentTarget.dataset.farmMetric === "amount" ? "amount" : "usd";
+        saveFarmView();
+        renderFarmChart(state.username);
       }
 
       function getDataCacheKey(username) {
@@ -1699,6 +2013,7 @@
         elements.updatedAt.textContent = formatDataTimestamp(fetchedAt, timestampLabel);
         setStatus(priceWarning || "", priceWarning ? "warning" : "");
         renderTable();
+        renderFarmChart(username);
       }
 
       function restoreCachedDashboard(username) {
@@ -1708,7 +2023,7 @@
 
         if (!snapshot) {
           elements.updatedAt.textContent = "No saved data";
-          setStatus(username.trim() ? "No saved data for @" + username + ". Click Refresh to fetch the latest profile." : "Enter your RollerCoin username and click Refresh.", "");
+          setStatus("No saved data for @" + username + ". Click Refresh to fetch the latest profile.", "");
           renderTable();
           return;
         }
@@ -1775,6 +2090,8 @@
             priceResult.warning
           );
           saveDataCache(trimmedUsername, userData, leagues, priceResult.prices, fetchedAt, priceResult.warning);
+          saveFarmSnapshot(trimmedUsername, state.rows);
+          renderFarmChart(trimmedUsername);
         } catch (error) {
           if (requestId !== state.requestId) {
             return;
@@ -1805,13 +2122,25 @@
         button.addEventListener("click", handleSort);
       });
 
+      document.querySelectorAll("[data-farm-metric]").forEach(function (button) {
+        button.addEventListener("click", handleFarmMetricClick);
+      });
+      elements.farmChart.addEventListener("click", handleFarmLegendClick);
+      updateFarmToggle();
+
       const savedUsername = readStorage(USERNAME_KEY, DEFAULT_USERNAME);
       if (typeof savedUsername === "string" && savedUsername.trim()) {
         elements.usernameInput.value = savedUsername;
       }
 
       if (window.__WITHDRAW_RADAR_TEST__) {
-        window.__withdrawRadarTestApi = { calculateNextLeagueTarget: calculateNextLeagueTarget };
+        window.__withdrawRadarTestApi = {
+          calculateNextLeagueTarget: calculateNextLeagueTarget,
+          recordFarmSnapshot: recordFarmSnapshot,
+          buildFarmSeries: buildFarmSeries,
+          normalizeFarmView: normalizeFarmView,
+          toggleFarmSymbol: toggleFarmSymbol
+        };
       }
 
       restoreCachedDashboard(elements.usernameInput.value);
