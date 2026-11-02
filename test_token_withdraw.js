@@ -218,4 +218,15 @@ function currency(name, tokensPerDay, totalPower, scale) {
     assert.equal(api.farmChangePercent([0, 5]), null);
 }
 
+// Per-point change: versus the previous recorded point and versus the first recorded point.
+{
+    const plain = (value) => JSON.parse(JSON.stringify(value));
+    const values = [null, 10, null, 15, 12];
+    assert.deepEqual(plain(api.farmPointChanges(values, 1)), { vsPrevious: null, vsStart: null });
+    assert.deepEqual(plain(api.farmPointChanges(values, 3)), { vsPrevious: 50, vsStart: 50 });
+    assert.deepEqual(plain(api.farmPointChanges(values, 4)), { vsPrevious: -20, vsStart: 20 });
+    // A zero reference value cannot produce a percentage.
+    assert.deepEqual(plain(api.farmPointChanges([0, 5], 1)), { vsPrevious: null, vsStart: null });
+}
+
 console.log('token_withdraw tests passed');

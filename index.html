@@ -804,6 +804,37 @@
       stroke-linejoin: round;
     }
 
+    .farm-point {
+      cursor: pointer;
+    }
+
+    .farm-tooltip {
+      position: fixed;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-width: 280px;
+      padding: 9px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel-raised);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+      color: var(--text);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      line-height: 1.4;
+      pointer-events: none;
+    }
+
+    .farm-tooltip[hidden] {
+      display: none;
+    }
+
+    .farm-tooltip-change {
+      color: var(--muted-bright);
+    }
+
     .farm-line-gap {
       stroke-dasharray: 5 5;
       opacity: 0.7;
@@ -1178,6 +1209,7 @@
             <div class="panel-note">One snapshot per day on Refresh.<br>History stays in this browser only.</div>
           </div>
         </div>
+        <div class="farm-tooltip" id="farmTooltip" role="tooltip" hidden></div>
         <div id="farmChart"><div class="empty-state"><strong>No history yet</strong><span>Click Refresh to record today's farm.</span></div></div>
       </section>
 
@@ -1259,7 +1291,8 @@
         nextLeagueRemaining: document.getElementById("nextLeagueRemaining"),
         nextLeagueMatch: document.getElementById("nextLeagueMatch"),
         resultsBody: document.getElementById("resultsBody"),
-        farmChart: document.getElementById("farmChart")
+        farmChart: document.getElementById("farmChart"),
+        farmTooltip: document.getElementById("farmTooltip")
       };
 
       const state = {
@@ -1484,6 +1517,21 @@
         return (recorded[recorded.length - 1] - recorded[0]) / recorded[0] * 100;
       }
 
+      function farmPointChanges(values, index) {
+        const percentFrom = function (reference) {
+          return reference === null || reference === 0 ? null : (values[index] - reference) / reference * 100;
+        };
+        let previous = null;
+        let start = null;
+        for (let position = 0; position < index; position++) {
+          if (values[position] !== null) {
+            start = start === null ? values[position] : start;
+            previous = values[position];
+          }
+        }
+        return { vsPrevious: percentFrom(previous), vsStart: percentFrom(start) };
+      }
+
       function normalizeFarmView(saved) {
         const source = saved && typeof saved === "object" ? saved : {};
         const hidden = Array.isArray(source.hidden) ? source.hidden : [];
@@ -1533,8 +1581,14 @@
       function renderFarmChart(username) {
         updateFarmToggle();
         const metric = state.farmView.metric;
-        const view = buildFarmSeries(loadFarmHistory(username), toDateKey(new Date()), metric);
+        const history = loadFarmHistory(username);
+        const today = toDateKey(new Date());
+        const view = buildFarmSeries(history, today, metric);
+        const usdSeries = metric === "usd" ? view.series : buildFarmSeries(history, today, "usd").series;
+        const amountSeries = metric === "amount" ? view.series : buildFarmSeries(history, today, "amount").series;
         const symbols = Object.keys(view.series).filter(function (symbol) { return TOKEN_CONFIG[symbol]; });
+        state.farmPoints = {};
+        hideFarmTooltip();
         if (!symbols.length) {
           elements.farmChart.innerHTML = "<div class=\"empty-state\"><strong>No history yet</strong><span>Click Refresh to record today's farm.</span></div>";
           return;
@@ -1577,11 +1631,19 @@
             svg += "<line class=\"farm-line" + (segment.gap ? " farm-line-gap" : "") + "\" stroke=\"" + color + "\" x1=\"" + xAt(segment.from).toFixed(1) +
               "\" y1=\"" + yAt(values[segment.from], symbol).toFixed(1) + "\" x2=\"" + xAt(segment.to).toFixed(1) + "\" y2=\"" + yAt(values[segment.to], symbol).toFixed(1) + "\"></line>";
           });
-          // Dots mark each recorded day; <title> gives a hover tooltip.
-          view.series[symbol].forEach(function (value, index) {
+          // Dots mark each recorded day; hovering one shows the tooltip (the transparent stroke widens the hit area).
+          values.forEach(function (value, index) {
             if (value !== null) {
-              svg += "<circle cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) + "\" r=\"3\" fill=\"" + color + "\"><title>" +
-                escapeHtml(symbol + " " + view.dates[index] + ": " + formatValue(value, symbol)) + "</title></circle>";
+              const pointKey = symbol + ":" + index;
+              state.farmPoints[pointKey] = {
+                symbol: symbol,
+                date: view.dates[index],
+                usd: usdSeries[symbol][index],
+                amount: amountSeries[symbol][index],
+                changes: farmPointChanges(values, index)
+              };
+              svg += "<circle class=\"farm-point\" data-farm-point=\"" + pointKey + "\" cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) +
+                "\" r=\"3\" fill=\"" + color + "\" stroke=\"transparent\" stroke-width=\"14\"></circle>";
             }
           });
         });
@@ -1601,6 +1663,38 @@
           : "<div class=\"empty-state\"><strong>All tokens hidden</strong><span>Click a token below to show it.</span></div>";
         const note = normalized ? "<div class=\"farm-note\">Each token is scaled to its own peak; hover a point for the real amount. Select a single token for a real axis.</div>" : "";
         elements.farmChart.innerHTML = body + note + "<div class=\"farm-legend\">" + legend + "</div>";
+      }
+
+      function formatChangePercent(value) {
+        if (value === null) {
+          return "<span class=\"farm-change\">--</span>";
+        }
+        const className = value === 0 ? "farm-change" : (value > 0 ? "farm-change farm-change-up" : "farm-change farm-change-down");
+        return "<span class=\"" + className + "\">" + (value > 0 ? "+" : "") + value.toFixed(1) + "%</span>";
+      }
+
+      function hideFarmTooltip() {
+        elements.farmTooltip.hidden = true;
+      }
+
+      function showFarmTooltip(event) {
+        const target = event.target && event.target.closest ? event.target.closest("[data-farm-point]") : null;
+        const point = target && state.farmPoints ? state.farmPoints[target.dataset.farmPoint] : null;
+        if (!point) {
+          hideFarmTooltip();
+          return;
+        }
+        const unit = state.farmView.metric === "usd" ? "USD" : "token";
+        const tooltip = elements.farmTooltip;
+        tooltip.innerHTML = "<strong>" + escapeHtml(point.symbol + " · " + point.date) + "</strong>" +
+          "<span>" + escapeHtml(point.amount === null ? "-- (recorded before token amounts were saved)" : formatToken(point.amount, point.symbol)) + "</span>" +
+          "<span>" + escapeHtml(point.usd === null ? "--" : formatUsd(point.usd)) + "</span>" +
+          "<span class=\"farm-tooltip-change\">vs previous " + formatChangePercent(point.changes.vsPrevious) + " · vs start " + formatChangePercent(point.changes.vsStart) + " (" + unit + ")</span>";
+        tooltip.hidden = false;
+        const gap = 14;
+        const rightEdge = event.clientX + gap + tooltip.offsetWidth;
+        tooltip.style.left = (rightEdge > window.innerWidth ? event.clientX - gap - tooltip.offsetWidth : event.clientX + gap) + "px";
+        tooltip.style.top = Math.max(8, event.clientY - tooltip.offsetHeight - gap) + "px";
       }
 
       function handleFarmLegendClick(event) {
@@ -2163,6 +2257,9 @@
         button.addEventListener("click", handleFarmMetricClick);
       });
       elements.farmChart.addEventListener("click", handleFarmLegendClick);
+      elements.farmChart.addEventListener("mouseover", showFarmTooltip);
+      elements.farmChart.addEventListener("mousemove", showFarmTooltip);
+      elements.farmChart.addEventListener("mouseleave", hideFarmTooltip);
       updateFarmToggle();
 
       const savedUsername = readStorage(USERNAME_KEY, DEFAULT_USERNAME);
@@ -2177,6 +2274,7 @@
           buildFarmSeries: buildFarmSeries,
           farmLineSegments: farmLineSegments,
           farmChangePercent: farmChangePercent,
+          farmPointChanges: farmPointChanges,
           normalizeFarmView: normalizeFarmView,
           toggleFarmSymbol: toggleFarmSymbol
         };
