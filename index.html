@@ -338,6 +338,10 @@
       margin-bottom: 30px;
     }
 
+    .summary-grid > * {
+      min-width: 0;
+    }
+
     .stat-card {
       min-height: 94px;
       padding: 17px 18px;
@@ -804,8 +808,19 @@
       stroke-linejoin: round;
     }
 
+    .farm-chart {
+      cursor: crosshair;
+    }
+
     .farm-point {
-      cursor: pointer;
+      pointer-events: none;
+    }
+
+    .farm-day-cursor {
+      stroke: var(--violet);
+      stroke-width: 1;
+      stroke-dasharray: 4 4;
+      pointer-events: none;
     }
 
     .farm-tooltip {
@@ -813,9 +828,9 @@
       z-index: 20;
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      max-width: 280px;
-      padding: 9px 12px;
+      gap: 8px;
+      max-width: min(380px, calc(100vw - 16px));
+      padding: 10px 12px;
       border: 1px solid var(--line-strong);
       border-radius: 8px;
       background: var(--panel-raised);
@@ -831,8 +846,36 @@
       display: none;
     }
 
-    .farm-tooltip-change {
-      color: var(--muted-bright);
+    .farm-tooltip-title {
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+
+    .farm-tooltip-grid {
+      display: grid;
+      grid-template-columns: repeat(5, auto);
+      gap: 5px 14px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .farm-tooltip-head {
+      color: var(--muted);
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .farm-tooltip-token {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+
+    .farm-tooltip-note {
+      color: var(--muted);
+      font-size: 0.6rem;
     }
 
     .farm-line-gap {
@@ -910,6 +953,12 @@
 
     .farm-change-down {
       color: var(--danger);
+    }
+
+    .farm-change-day {
+      margin-left: 2px;
+      padding-left: 6px;
+      border-left: 1px solid var(--line);
     }
 
     .farm-legend-item[aria-pressed="false"] {
@@ -1043,7 +1092,17 @@
       }
 
       .summary-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .league-progress-meta {
+        flex-wrap: wrap;
+        white-space: normal;
+      }
+
+      .league-progress-remaining {
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
 
       .stat-card {
@@ -1100,6 +1159,10 @@
       .control-hint {
         flex-direction: column;
         gap: 6px;
+      }
+
+      .farm-toggle-button {
+        padding: 6px 10px;
       }
     }
 
@@ -1198,15 +1261,22 @@
       <section class="table-panel farm-panel" aria-labelledby="farm-title">
         <div class="panel-header">
           <div>
-            <span class="panel-kicker">Daily farm / last 15 days</span>
+            <span class="panel-kicker" id="farmKicker">Daily farm / last 15 days</span>
             <h2 class="panel-title" id="farm-title">Farm timeline</h2>
           </div>
           <div class="farm-controls">
+            <div class="farm-toggle" role="group" aria-label="Chart period">
+              <button class="farm-toggle-button" type="button" data-farm-days="7" aria-pressed="false">7D</button>
+              <button class="farm-toggle-button" type="button" data-farm-days="15" aria-pressed="true">15D</button>
+              <button class="farm-toggle-button" type="button" data-farm-days="30" aria-pressed="false">30D</button>
+              <button class="farm-toggle-button" type="button" data-farm-days="60" aria-pressed="false">60D</button>
+              <button class="farm-toggle-button" type="button" data-farm-days="90" aria-pressed="false">90D</button>
+            </div>
             <div class="farm-toggle" role="group" aria-label="Chart unit">
               <button class="farm-toggle-button" type="button" data-farm-metric="usd" aria-pressed="true">USD</button>
               <button class="farm-toggle-button" type="button" data-farm-metric="amount" aria-pressed="false">Token</button>
             </div>
-            <div class="panel-note">One snapshot per day on Refresh.<br>History stays in this browser only.</div>
+            <div class="panel-note">One snapshot per day on Refresh.<br>Click a day for its values. History stays in this browser only.</div>
           </div>
         </div>
         <div class="farm-tooltip" id="farmTooltip" role="tooltip" hidden></div>
@@ -1234,7 +1304,9 @@
       const DATA_CACHE_PREFIX = "rollercoin-withdraw-data-v1:";
       const DEFAULT_BLOCK_SECONDS = 596;
       const FARM_HISTORY_PREFIX = "rollercoin-withdraw-farm-history-v1:";
-      const FARM_HISTORY_DAYS = 15;
+      const FARM_HISTORY_RETENTION_DAYS = 90;
+      const FARM_PERIODS = [7, 15, 30, 60, 90];
+      const FARM_DEFAULT_DAYS = 15;
       const FARM_VIEW_KEY = "rollercoin-withdraw-farm-view-v1";
 
       const TOKEN_CONFIG = {
@@ -1292,6 +1364,7 @@
         nextLeagueMatch: document.getElementById("nextLeagueMatch"),
         resultsBody: document.getElementById("resultsBody"),
         farmChart: document.getElementById("farmChart"),
+        farmKicker: document.getElementById("farmKicker"),
         farmTooltip: document.getElementById("farmTooltip")
       };
 
@@ -1307,6 +1380,10 @@
         sortKey: "days",
         sortDirection: "asc",
         farmView: normalizeFarmView(readStorage(FARM_VIEW_KEY, null)),
+        farmSelectedDate: null,
+        farmTooltipAnchor: null,
+        farmChartData: null,
+        farmGeometry: null,
         loading: false,
         requestId: 0
       };
@@ -1457,7 +1534,7 @@
       function recordFarmSnapshot(history, dateKey, dailyUsdBySymbol) {
         const next = Object.assign({}, history);
         next[dateKey] = Object.assign({}, dailyUsdBySymbol);
-        Object.keys(next).sort().slice(0, -FARM_HISTORY_DAYS).forEach(function (key) { delete next[key]; });
+        Object.keys(next).sort().slice(0, -FARM_HISTORY_RETENTION_DAYS).forEach(function (key) { delete next[key]; });
         return next;
       }
 
@@ -1475,10 +1552,11 @@
         return Number.isFinite(value) ? value : null;
       }
 
-      function buildFarmSeries(history, endDateKey, metric) {
+      function buildFarmSeries(history, endDateKey, metric, days) {
         const end = new Date(endDateKey + "T00:00:00Z");
         const dates = [];
-        for (let offset = FARM_HISTORY_DAYS - 1; offset >= 0; offset--) {
+        const span = days || FARM_DEFAULT_DAYS;
+        for (let offset = span - 1; offset >= 0; offset--) {
           dates.push(new Date(end.getTime() - offset * 86400000).toISOString().slice(0, 10));
         }
         const series = {};
@@ -1532,11 +1610,31 @@
         return { vsPrevious: percentFrom(previous), vsStart: percentFrom(start) };
       }
 
+      // Change of the latest recorded value against the one before it (the previous day).
+      function farmLatestDayChange(values) {
+        let latest = -1;
+        values.forEach(function (value, index) {
+          if (value !== null) {
+            latest = index;
+          }
+        });
+        return latest > 0 ? farmPointChanges(values, latest).vsPrevious : null;
+      }
+
+      function farmChangeClass(value) {
+        if (value === null || value === 0) {
+          return "";
+        }
+        return value > 0 ? " farm-change-up" : " farm-change-down";
+      }
+
       function normalizeFarmView(saved) {
         const source = saved && typeof saved === "object" ? saved : {};
         const hidden = Array.isArray(source.hidden) ? source.hidden : [];
+        const days = Number(source.days);
         return {
           metric: source.metric === "amount" ? "amount" : "usd",
+          days: FARM_PERIODS.indexOf(days) === -1 ? FARM_DEFAULT_DAYS : days,
           hidden: hidden.filter(function (symbol, index) {
             return TOKEN_CONFIG[symbol] && hidden.indexOf(symbol) === index;
           })
@@ -1576,20 +1674,30 @@
         document.querySelectorAll("[data-farm-metric]").forEach(function (button) {
           button.setAttribute("aria-pressed", String(button.dataset.farmMetric === state.farmView.metric));
         });
+        document.querySelectorAll("[data-farm-days]").forEach(function (button) {
+          button.setAttribute("aria-pressed", String(Number(button.dataset.farmDays) === state.farmView.days));
+        });
       }
 
       function renderFarmChart(username) {
         updateFarmToggle();
         const metric = state.farmView.metric;
+        const days = state.farmView.days;
         const history = loadFarmHistory(username);
         const today = toDateKey(new Date());
-        const view = buildFarmSeries(history, today, metric);
-        const usdSeries = metric === "usd" ? view.series : buildFarmSeries(history, today, "usd").series;
-        const amountSeries = metric === "amount" ? view.series : buildFarmSeries(history, today, "amount").series;
+        const view = buildFarmSeries(history, today, metric, days);
+        const usdSeries = metric === "usd" ? view.series : buildFarmSeries(history, today, "usd", days).series;
+        const amountSeries = metric === "amount" ? view.series : buildFarmSeries(history, today, "amount", days).series;
         const symbols = Object.keys(view.series).filter(function (symbol) { return TOKEN_CONFIG[symbol]; });
-        state.farmPoints = {};
-        hideFarmTooltip();
+        elements.farmKicker.textContent = "Daily farm / last " + days + " days";
+        if (state.farmSelectedDate && view.dates.indexOf(state.farmSelectedDate) === -1) {
+          state.farmSelectedDate = null;
+          state.farmTooltipAnchor = null;
+        }
+        state.farmGeometry = null;
+        state.farmChartData = null;
         if (!symbols.length) {
+          hideFarmTooltip();
           elements.farmChart.innerHTML = "<div class=\"empty-state\"><strong>No history yet</strong><span>Click Refresh to record today's farm.</span></div>";
           return;
         }
@@ -1609,6 +1717,7 @@
         const xAt = function (index) { return left + plotWidth * index / lastIndex; };
         const yAt = function (value, symbol) { return top + plotHeight * (1 - value / (normalized ? peakOf(symbol) : sharedMax)); };
         const formatValue = function (value, symbol) { return metric === "usd" ? formatUsd(value) : formatToken(value, symbol); };
+        const selectedIndex = state.farmSelectedDate ? view.dates.indexOf(state.farmSelectedDate) : -1;
 
         let svg = "";
         for (let step = 0; step <= 4; step++) {
@@ -1617,11 +1726,16 @@
           svg += "<line class=\"farm-grid-line\" x1=\"" + left + "\" x2=\"" + (width - right) + "\" y1=\"" + y + "\" y2=\"" + y + "\"></line>" +
             "<text class=\"farm-axis-label\" x=\"" + (left - 8) + "\" y=\"" + (y + 3) + "\" text-anchor=\"end\">" + escapeHtml(label) + "</text>";
         }
+        // Thin the date labels as the period grows; the latest day is always labelled.
+        const labelStep = Math.ceil(days / 8);
         view.dates.forEach(function (dateKey, index) {
-          if (index % 2 === lastIndex % 2) {
-            svg += "<text class=\"farm-axis-label\" x=\"" + xAt(index) + "\" y=\"" + (height - 8) + "\" text-anchor=\"middle\">" + escapeHtml(dateKey.slice(5)) + "</text>";
+          if ((lastIndex - index) % labelStep === 0) {
+            svg += "<text class=\"farm-axis-label\" x=\"" + xAt(index).toFixed(1) + "\" y=\"" + (height - 8) + "\" text-anchor=\"middle\">" + escapeHtml(dateKey.slice(5)) + "</text>";
           }
         });
+        if (selectedIndex !== -1) {
+          svg += "<line class=\"farm-day-cursor\" x1=\"" + xAt(selectedIndex).toFixed(1) + "\" x2=\"" + xAt(selectedIndex).toFixed(1) + "\" y1=\"" + top + "\" y2=\"" + (top + plotHeight) + "\"></line>";
+        }
 
         visible.forEach(function (symbol) {
           const color = TOKEN_CONFIG[symbol].color;
@@ -1631,19 +1745,11 @@
             svg += "<line class=\"farm-line" + (segment.gap ? " farm-line-gap" : "") + "\" stroke=\"" + color + "\" x1=\"" + xAt(segment.from).toFixed(1) +
               "\" y1=\"" + yAt(values[segment.from], symbol).toFixed(1) + "\" x2=\"" + xAt(segment.to).toFixed(1) + "\" y2=\"" + yAt(values[segment.to], symbol).toFixed(1) + "\"></line>";
           });
-          // Dots mark each recorded day; hovering one shows the tooltip (the transparent stroke widens the hit area).
+          // Dots mark each recorded day. Clicks are handled on the whole chart and snap to the nearest day.
           values.forEach(function (value, index) {
             if (value !== null) {
-              const pointKey = symbol + ":" + index;
-              state.farmPoints[pointKey] = {
-                symbol: symbol,
-                date: view.dates[index],
-                usd: usdSeries[symbol][index],
-                amount: amountSeries[symbol][index],
-                changes: farmPointChanges(values, index)
-              };
-              svg += "<circle class=\"farm-point\" data-farm-point=\"" + pointKey + "\" cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) +
-                "\" r=\"3\" fill=\"" + color + "\" stroke=\"transparent\" stroke-width=\"14\"></circle>";
+              svg += "<circle class=\"farm-point\" cx=\"" + xAt(index).toFixed(1) + "\" cy=\"" + yAt(value, symbol).toFixed(1) +
+                "\" r=\"" + (index === selectedIndex ? 4.5 : 3) + "\" fill=\"" + color + "\"></circle>";
             }
           });
         });
@@ -1651,18 +1757,27 @@
         const legend = symbols.map(function (symbol) {
           const active = state.farmView.hidden.indexOf(symbol) === -1;
           const change = farmChangePercent(view.series[symbol]);
-          const changeClass = change === null || change === 0 ? "" : (change > 0 ? " farm-change-up" : " farm-change-down");
+          const daily = farmLatestDayChange(view.series[symbol]);
           const changeLabel = change === null ? "--" : (change > 0 ? "+" : "") + change.toFixed(1) + "%";
+          const dailyLabel = daily === null ? "--" : (daily > 0 ? "+" : "") + daily.toFixed(1) + "%";
           return "<button class=\"farm-legend-item\" type=\"button\" data-farm-symbol=\"" + symbol + "\" aria-pressed=\"" + active + "\" title=\"" +
-            escapeHtml(symbol + " change over the period: " + changeLabel) + "\">" +
+            escapeHtml(symbol + " change over the period: " + changeLabel + " · vs previous day: " + dailyLabel) + "\">" +
             "<span class=\"farm-legend-swatch\" style=\"background:" + TOKEN_CONFIG[symbol].color + "\"></span>" + escapeHtml(symbol) +
-            "<span class=\"farm-change" + changeClass + "\">" + escapeHtml(changeLabel) + "</span></button>";
+            "<span class=\"farm-change" + farmChangeClass(change) + "\">" + escapeHtml(changeLabel) + "</span>" +
+            "<span class=\"farm-change farm-change-day" + farmChangeClass(daily) + "\">d/d " + escapeHtml(dailyLabel) + "</span></button>";
         }).join("");
         const body = visible.length
           ? "<div class=\"farm-chart-wrap\"><svg class=\"farm-chart\" viewBox=\"0 0 " + width + " " + height + "\" role=\"img\" aria-label=\"Daily farm per token over the last 15 days\">" + svg + "</svg></div>"
           : "<div class=\"empty-state\"><strong>All tokens hidden</strong><span>Click a token below to show it.</span></div>";
-        const note = normalized ? "<div class=\"farm-note\">Each token is scaled to its own peak; hover a point for the real amount. Select a single token for a real axis.</div>" : "";
+        const note = normalized ? "<div class=\"farm-note\">Each token is scaled to its own peak; click a day for the real amounts. Select a single token for a real axis.</div>" : "";
         elements.farmChart.innerHTML = body + note + "<div class=\"farm-legend\">" + legend + "</div>";
+        state.farmGeometry = { width: width, left: left, plotWidth: plotWidth, lastIndex: lastIndex, dates: view.dates };
+        state.farmChartData = { dates: view.dates, visible: visible, series: view.series, amountSeries: amountSeries, usdSeries: usdSeries };
+        if (state.farmSelectedDate && visible.length) {
+          showFarmDayTooltip();
+        } else {
+          hideFarmTooltip();
+        }
       }
 
       function formatChangePercent(value) {
@@ -1677,24 +1792,79 @@
         elements.farmTooltip.hidden = true;
       }
 
-      function showFarmTooltip(event) {
-        const target = event.target && event.target.closest ? event.target.closest("[data-farm-point]") : null;
-        const point = target && state.farmPoints ? state.farmPoints[target.dataset.farmPoint] : null;
-        if (!point) {
+      // Lists every visible token for the selected day in one tooltip, positioned next to the click.
+      function showFarmDayTooltip() {
+        const data = state.farmChartData;
+        const index = data ? data.dates.indexOf(state.farmSelectedDate) : -1;
+        if (index === -1 || !data.visible.length) {
           hideFarmTooltip();
           return;
         }
+        const rows = data.visible.map(function (symbol) {
+          const series = data.series[symbol];
+          const recorded = series[index] !== null;
+          const changes = recorded ? farmPointChanges(series, index) : { vsPrevious: null, vsStart: null };
+          const amount = data.amountSeries[symbol][index];
+          const usd = data.usdSeries[symbol][index];
+          return "<span class=\"farm-tooltip-token\"><span class=\"farm-legend-swatch\" style=\"background:" + TOKEN_CONFIG[symbol].color + "\"></span>" + escapeHtml(symbol) + "</span>" +
+            "<span>" + escapeHtml(amount === null ? "--" : formatToken(amount, symbol)) + "</span>" +
+            "<span>" + escapeHtml(usd === null ? "--" : formatUsd(usd)) + "</span>" +
+            "<span>" + formatChangePercent(changes.vsPrevious) + "</span>" +
+            "<span>" + formatChangePercent(changes.vsStart) + "</span>";
+        }).join("");
         const unit = state.farmView.metric === "usd" ? "USD" : "token";
         const tooltip = elements.farmTooltip;
-        tooltip.innerHTML = "<strong>" + escapeHtml(point.symbol + " · " + point.date) + "</strong>" +
-          "<span>" + escapeHtml(point.amount === null ? "-- (recorded before token amounts were saved)" : formatToken(point.amount, point.symbol)) + "</span>" +
-          "<span>" + escapeHtml(point.usd === null ? "--" : formatUsd(point.usd)) + "</span>" +
-          "<span class=\"farm-tooltip-change\">vs previous " + formatChangePercent(point.changes.vsPrevious) + " · vs start " + formatChangePercent(point.changes.vsStart) + " (" + unit + ")</span>";
+        tooltip.innerHTML = "<div class=\"farm-tooltip-title\">" + escapeHtml(state.farmSelectedDate) + "</div>" +
+          "<div class=\"farm-tooltip-grid\">" +
+          "<span class=\"farm-tooltip-head\">Token</span><span class=\"farm-tooltip-head\">Amount</span><span class=\"farm-tooltip-head\">USD</span><span class=\"farm-tooltip-head\">vs prev</span><span class=\"farm-tooltip-head\">vs start</span>" +
+          rows + "</div>" +
+          "<div class=\"farm-tooltip-note\">Changes in " + unit + ": vs previous recorded day, vs first day in view.</div>";
         tooltip.hidden = false;
-        const gap = 14;
-        const rightEdge = event.clientX + gap + tooltip.offsetWidth;
-        tooltip.style.left = (rightEdge > window.innerWidth ? event.clientX - gap - tooltip.offsetWidth : event.clientX + gap) + "px";
-        tooltip.style.top = Math.max(8, event.clientY - tooltip.offsetHeight - gap) + "px";
+        const anchor = state.farmTooltipAnchor || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        const gap = 14, margin = 8;
+        const tipWidth = tooltip.offsetWidth, tipHeight = tooltip.offsetHeight;
+        let tipLeft = anchor.x + gap;
+        if (tipLeft + tipWidth > window.innerWidth - margin) {
+          tipLeft = anchor.x - gap - tipWidth;
+        }
+        tipLeft = Math.max(margin, Math.min(tipLeft, window.innerWidth - tipWidth - margin));
+        let tipTop = anchor.y - tipHeight - gap;
+        if (tipTop < margin) {
+          tipTop = anchor.y + gap;
+        }
+        tipTop = Math.max(margin, Math.min(tipTop, window.innerHeight - tipHeight - margin));
+        tooltip.style.left = tipLeft + "px";
+        tooltip.style.top = tipTop + "px";
+      }
+
+      function clearFarmSelection() {
+        state.farmSelectedDate = null;
+        state.farmTooltipAnchor = null;
+        renderFarmChart(state.username);
+      }
+
+      // A click anywhere on the chart selects the nearest day; clicking the selected day again clears it.
+      function handleFarmChartClick(event) {
+        if (event.target.closest && event.target.closest("[data-farm-symbol]")) {
+          handleFarmLegendClick(event);
+          return;
+        }
+        const svg = event.target.closest ? event.target.closest(".farm-chart") : null;
+        const geometry = state.farmGeometry;
+        if (!svg || !geometry) {
+          return;
+        }
+        const rect = svg.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width * geometry.width;
+        const index = Math.min(geometry.lastIndex, Math.max(0, Math.round((x - geometry.left) / geometry.plotWidth * geometry.lastIndex)));
+        const dateKey = geometry.dates[index];
+        if (state.farmSelectedDate === dateKey) {
+          clearFarmSelection();
+          return;
+        }
+        state.farmSelectedDate = dateKey;
+        state.farmTooltipAnchor = { x: event.clientX, y: event.clientY };
+        renderFarmChart(state.username);
       }
 
       function handleFarmLegendClick(event) {
@@ -1714,6 +1884,18 @@
 
       function handleFarmMetricClick(event) {
         state.farmView.metric = event.currentTarget.dataset.farmMetric === "amount" ? "amount" : "usd";
+        saveFarmView();
+        renderFarmChart(state.username);
+      }
+
+      function handleFarmDaysClick(event) {
+        const days = Number(event.currentTarget.dataset.farmDays);
+        if (FARM_PERIODS.indexOf(days) === -1) {
+          return;
+        }
+        state.farmView.days = days;
+        state.farmSelectedDate = null;
+        state.farmTooltipAnchor = null;
         saveFarmView();
         renderFarmChart(state.username);
       }
@@ -2115,6 +2297,8 @@
         state.balances = loadBalances(username);
         state.rows = [];
         state.leagues = [];
+        state.farmSelectedDate = null;
+        state.farmTooltipAnchor = null;
         state.sortKey = "days";
         state.sortDirection = "asc";
       }
@@ -2256,10 +2440,21 @@
       document.querySelectorAll("[data-farm-metric]").forEach(function (button) {
         button.addEventListener("click", handleFarmMetricClick);
       });
-      elements.farmChart.addEventListener("click", handleFarmLegendClick);
-      elements.farmChart.addEventListener("mouseover", showFarmTooltip);
-      elements.farmChart.addEventListener("mousemove", showFarmTooltip);
-      elements.farmChart.addEventListener("mouseleave", hideFarmTooltip);
+      document.querySelectorAll("[data-farm-days]").forEach(function (button) {
+        button.addEventListener("click", handleFarmDaysClick);
+      });
+      elements.farmChart.addEventListener("click", handleFarmChartClick);
+      // Clicking anywhere outside the chart (or pressing Escape) dismisses the selected day.
+      document.addEventListener("click", function (event) {
+        if (state.farmSelectedDate && event.composedPath().indexOf(elements.farmChart) === -1) {
+          clearFarmSelection();
+        }
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && state.farmSelectedDate) {
+          clearFarmSelection();
+        }
+      });
       updateFarmToggle();
 
       const savedUsername = readStorage(USERNAME_KEY, DEFAULT_USERNAME);
